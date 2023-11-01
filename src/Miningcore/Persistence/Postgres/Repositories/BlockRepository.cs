@@ -61,6 +61,24 @@ public class BlockRepository : IBlockRepository
             .ToArray();
     }
 
+    public async Task<Block[]> PageMinerBlocksAsync(IDbConnection con, string poolId, string address, BlockStatus[] status,
+        int page, int pageSize, CancellationToken ct)
+    {
+        const string query = @"SELECT * FROM blocks WHERE poolid = @poolid AND status = ANY(@status) AND miner = @address
+            ORDER BY created DESC OFFSET @offset FETCH NEXT @pageSize ROWS ONLY";
+
+        return (await con.QueryAsync<Entities.Block>(new CommandDefinition(query, new
+        {
+            poolId,
+	    address,
+            status = status.Select(x => x.ToString().ToLower()).ToArray(),
+            offset = page * pageSize,
+            pageSize
+        }, cancellationToken: ct)))
+            .Select(mapper.Map<Block>)
+            .ToArray();
+    }
+
     public async Task<Block[]> PageBlocksAsync(IDbConnection con, BlockStatus[] status, int page, int pageSize, CancellationToken ct)
     {
         const string query = @"SELECT * FROM blocks WHERE status = ANY(@status)

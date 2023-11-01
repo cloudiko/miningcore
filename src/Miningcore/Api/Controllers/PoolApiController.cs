@@ -397,6 +397,51 @@ public class PoolApiController : ApiControllerBase
         return stats;
     }
 
+    [HttpGet("{poolId}/miners/{address}/blocks")]
+    public async Task<Responses.Block[]> PageMinerBlocksAsync(
+        string poolId, string address, [FromQuery] int page, [FromQuery] int pageSize = 15, [FromQuery] BlockStatus[] state = null)
+    {
+        var pool = GetPool(poolId);
+        var ct = HttpContext.RequestAborted;
+
+        if(string.IsNullOrEmpty(address))
+            throw new ApiException("Invalid or missing miner address", HttpStatusCode.NotFound);
+
+        if(pool.Template.Family == CoinFamily.Ethereum)
+            address = address.ToLower();
+
+        var blockStates = state is { Length: > 0 } ?
+            state :
+            new[] { BlockStatus.Confirmed, BlockStatus.Pending, BlockStatus.Orphaned };
+
+        var blocks = (await cf.Run(con => blocksRepo.PageMinerBlocksAsync(con, pool.Id, address, blockStates, page, pageSize, ct)))
+            .Select(mapper.Map<Responses.Block>)
+            .ToArray();
+
+        // enrich blocks
+        var blockInfobaseDict = pool.Template.ExplorerBlockLinks;
+
+        foreach(var block in blocks)
+        {
+            // compute infoLink
+            if(blockInfobaseDict != null)
+            {
+                blockInfobaseDict.TryGetValue(!string.IsNullOrEmpty(block.Type) ? block.Type : "block", out var blockInfobaseUrl);
+
+                if(!string.IsNullOrEmpty(blockInfobaseUrl))
+                {
+                    if(blockInfobaseUrl.Contains(CoinMetaData.BlockHeightPH))
+                        block.InfoLink = blockInfobaseUrl.Replace(CoinMetaData.BlockHeightPH, block.BlockHeight.ToString(CultureInfo.InvariantCulture));
+                    else if(blockInfobaseUrl.Contains(CoinMetaData.BlockHashPH) && !string.IsNullOrEmpty(block.Hash))
+                        block.InfoLink = blockInfobaseUrl.Replace(CoinMetaData.BlockHashPH, block.Hash);
+                }
+            }
+        }
+
+        return blocks;
+    }
+
+
     [HttpGet("{poolId}/miners/{address}/payments")]
     public async Task<Responses.Payment[]> PageMinerPaymentsAsync(
         string poolId, string address, [FromQuery] int page, [FromQuery] int pageSize = 15)
